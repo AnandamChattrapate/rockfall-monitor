@@ -1,0 +1,7 @@
+opencv-python
+numpy
+fastapi
+uvicorn[standard]
+pytest
+httpx
+ultralytics  # optional: only needed for detector mode "yolo" / training
