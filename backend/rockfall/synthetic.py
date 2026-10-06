@@ -1,6 +1,8 @@
 """Synthetic rocky-slope video with rocks that detach and fall toward the bottom band."""
 from __future__ import annotations
 
+import math
+
 import cv2
 import numpy as np
 
@@ -48,3 +50,41 @@ def make_synthetic(path: str, frames: int = 150, w: int = 640, h: int = 360,
     out.release()
     return {"fps": fps, "onset_s": fall_start / fps,
             "impact_s": (impact if impact is not None else frames) / fps}
+
+
+def make_distractors(path: str, frames: int = 200, w: int = 640, h: int = 360,
+                     fps: int = 20, seed: int = 1, flash_at: int = 120) -> None:
+    """Write an mp4 with motion that must NOT alert: branches swaying in wind, birds flying
+    sideways, up and in loose circles, a person walking across, and one exposure jump."""
+    rng = np.random.default_rng(seed)
+    bg = _background(w, h, rng)
+    out = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+    if not out.isOpened():
+        raise RuntimeError("cannot open VideoWriter for " + path)
+    branches = [(80, 60), (560, 90), (330, 40)]
+    for f in range(frames):
+        t = f / fps
+        img = bg.copy()
+        # Branches: leaf clumps oscillating around fixed anchors (gusty, two frequencies).
+        for i, (ax, ay) in enumerate(branches):
+            sway = 22 * math.sin(2 * math.pi * (0.8 + 0.2 * i) * t) + 8 * math.sin(2 * math.pi * 2.3 * t)
+            bob = 6 * math.sin(2 * math.pi * 1.1 * t + i)
+            cv2.line(img, (ax, 0), (int(ax + sway), int(ay + bob)), (30, 60, 30), 5)
+            cv2.ellipse(img, (int(ax + sway), int(ay + bob)), (34, 22), 0, 0, 360, (30, 90, 40), -1)
+        # Bird 1: flies right with wing-beat bobbing.
+        bx, by = (40 + 9 * f) % (w + 40) - 20, 120 + 10 * math.sin(2 * math.pi * 3 * t)
+        cv2.ellipse(img, (int(bx), int(by)), (18, 8), 0, 0, 360, (20, 20, 20), -1)
+        # Bird 2: climbs diagonally up-left.
+        cx, cy = w - 5 * f % w, h * 0.7 - 2.0 * f % (h * 0.6)
+        cv2.ellipse(img, (int(cx), int(cy)), (16, 8), -30, 0, 360, (25, 25, 25), -1)
+        # Bird 3: circles (goes down, then up again).
+        cv2.ellipse(img, (int(450 + 60 * math.cos(1.5 * t)), int(160 + 60 * math.sin(1.5 * t))),
+                    (16, 8), 0, 0, 360, (25, 25, 25), -1)
+        # Person walking across the bench.
+        px = int(-40 + 4 * f) % (w + 80) - 40
+        cv2.rectangle(img, (px, 230 + int(3 * math.sin(2 * math.pi * 2 * t))),
+                      (px + 26, 300), (60, 40, 140), -1)
+        if flash_at <= f < flash_at + 3:  # auto-exposure jump / cloud shadow
+            img = cv2.convertScaleAbs(img, alpha=1.0, beta=70)
+        out.write(img)
+    out.release()

@@ -94,6 +94,25 @@ To use a backend on another host or port, set `VITE_API_URL` in `frontend/.env` 
 
 Press Ctrl+C in each terminal. The backend releases the camera within about 2 seconds.
 
+## False-positive control
+
+Anything that moves creates motion blobs: swaying trees, birds, people, vehicles, and shadows. The system only raises risk for motion that behaves like a rockfall.
+
+1. **Global-change gate.** A frame is skipped when more than 30% of its pixels change (`RF_GLOBAL_MOTION_MAX`). This covers auto-exposure jumps, cloud shadows and camera shake.
+2. **Fall kinematics (K).** Each track's whole trajectory is scored from 0 to 1, and the risk is multiplied by K. A track scores high only when all of these hold:
+   - it moves down by at least 5% of the frame height (`RF_FALL_MIN_DROP`);
+   - it moves mostly vertically, within about 25° of vertical;
+   - its path is nearly straight, with no up-down or left-right reversals;
+   - it bends toward vertical, as gravity makes a fall do, never toward horizontal.
+
+   This rejects swaying branches (they oscillate), birds and people moving sideways or upward, birds pulling out of a dive, and static rocks. A track needs 4 matched updates before it can score (`RF_FALL_MIN_POINTS`).
+3. **COCO veto (optional).** A stock YOLOv8n model removes detections that it labels as a bird, person, vehicle or animal. On first use, it downloads `yolov8n.pt` to `backend/models/` (about 6 MB). If the model cannot load, the system logs a warning and uses rules 1 and 2 only. To turn it off, set `RF_VETO_MODEL=` (empty).
+4. **Rock classes only in YOLO mode.** Only the classes in `RF_ROCK_CLASSES` count as rocks.
+
+Risk score: `R = K × (0.35·C + 0.30·max(ΔA, V) + 0.25·P + 0.10·(1 − D))`, where `V` is the downward speed. A rock falling across the view barely changes size, so the paper's area-growth term ΔA alone under-scores it.
+
+Known limit: rule 2 cannot separate a bird diving straight down from a falling rock. The COCO veto covers that case. For a site with frequent birds, keep the veto on, or train rock weights for YOLO mode.
+
 ## Configuration
 
 Settings come from environment variables with the prefix `RF_`. To use a file:

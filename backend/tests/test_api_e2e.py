@@ -5,7 +5,7 @@ from rockfall.api import create_app
 from rockfall.config import Settings
 from rockfall.pipeline import Pipeline, run_offline
 from rockfall.store import EventStore
-from rockfall.synthetic import make_synthetic
+from rockfall.synthetic import make_distractors, make_synthetic
 
 
 @pytest.fixture(scope="module")
@@ -40,7 +40,16 @@ def test_ws_contract(tmp_path):
 
 
 def test_end_to_end_synthetic_alert(video):
-    events = run_offline(video, Settings(detector_mode="motion"))
+    events = run_offline(video, Settings(detector_mode="motion", veto_model=""))
     types = {e["type"] for e in events}
     assert "ALERT" in types, events
     assert any(e["level"] == "HIGH" for e in events)
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3])
+def test_distractors_never_reach_high(tmp_path, seed):
+    """Swaying branches, birds, a walking person and an exposure jump must not alert."""
+    p = str(tmp_path / "d.mp4")
+    make_distractors(p, seed=seed)
+    events = run_offline(p, Settings(detector_mode="motion", veto_model=""))
+    assert not any(e["level"] == "HIGH" for e in events), events

@@ -11,7 +11,7 @@ import numpy as np
 
 from .alerts import AlertManager, region_of
 from .config import Settings
-from .detector import Detector
+from .detector import Detector, Veto
 from .motion import MotionFilter
 from .risk import HIGH, LOW, MODERATE, classify, danger_zone, score
 from .store import EventStore
@@ -31,6 +31,7 @@ class Pipeline:
         self.clock = clock
         self.motion = MotionFilter(cfg)
         self.detector = Detector(cfg)
+        self.veto = Veto(cfg)
         self.tracker = IoUTracker(cfg)
         self.alerts = alerts or AlertManager(cfg, clock=clock)
         self.level = LOW
@@ -54,8 +55,9 @@ class Pipeline:
 
     def process_frame(self, frame: np.ndarray) -> dict:
         m = self.motion.process(frame)
-        forwarded = m.ratio >= self.cfg.theta
-        dets = self.detector.detect(frame, m) if forwarded else []
+        # Very high ratio = exposure change, cloud shadow or camera shake, not a rock.
+        forwarded = self.cfg.theta <= m.ratio <= self.cfg.global_motion_max
+        dets = self.veto.filter(frame, self.detector.detect(frame, m)) if forwarded else []
         active = self.tracker.update(dets)
         tracks, best, best_track = [], 0.0, None
         for t in active:
@@ -68,7 +70,7 @@ class Pipeline:
         self.risk = best
         self.level = classify(best, self.cfg)
         region = region_of(best_track.bbox, frame.shape, self.cfg.grid) if best_track else None
-        event = self.alerts.update(self.level, best, region)
+        event = self.alerts.update(self.level, best, region, best_track)
         if event is not None:
             event["id"] = self.store.add(event) if self.store else len(self.recent_events) + 1
             self.recent_events.append(event)

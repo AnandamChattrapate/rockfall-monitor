@@ -5,7 +5,7 @@ from rockfall.alerts import AlertManager, region_of
 from rockfall.config import Settings
 from rockfall.detector import Detection
 from rockfall.motion import MotionFilter
-from rockfall.risk import classify, score
+from rockfall.risk import base_score, classify, fall_kinematics, score
 from rockfall.tracker import IoUTracker, Track, iou
 from collections import deque
 
@@ -70,18 +70,18 @@ def mk_track(bbox, conf, growth, hits):
     return Track(1, bbox, conf, 10, deque([bbox]), deque(hits, maxlen=10), growth)
 
 
-def test_risk_hand_computed():
+def test_base_score_hand_computed():
     cfg = Settings()
     shape = (400, 300, 3)  # H=400 W=300 diag=500; zone y>=300
     # centre y=100 -> dist 200 -> Dnorm .4
     t = mk_track((100, 50, 140, 150), 0.8, 0.5, [True] * 6)  # P=.6
     # .35*.8 + .30*.5 + .25*.6 + .10*.6 = .28+.15+.15+.06 = .64
-    assert score(t, shape, cfg) == pytest.approx(0.64)
+    assert base_score(t, shape, cfg) == pytest.approx(0.64)
     # inside the band: Dnorm 0 -> w4 term full
     t2 = mk_track((100, 330, 140, 390), 1.0, 1.0, [True] * 10)
-    assert score(t2, shape, cfg) == pytest.approx(1.0)
+    assert base_score(t2, shape, cfg) == pytest.approx(1.0)
     t3 = mk_track((100, 330, 140, 390), 0.0, 0.0, [])
-    assert score(t3, shape, cfg) == pytest.approx(0.10)
+    assert base_score(t3, shape, cfg) == pytest.approx(0.10)
 
 
 def test_classify_thresholds():
@@ -149,3 +149,83 @@ def test_alert_calls_notifier():
 def test_region_of():
     assert region_of((0, 0, 10, 10), (300, 300, 3), 3) == "r0c0"
     assert region_of((290, 290, 300, 300), (300, 300, 3), 3) == "r2c2"
+
+
+# ---- false-positive control -------------------------------------------------
+
+SHAPE = (400, 600, 3)  # H=400
+
+
+def path_track(points, conf=0.8):
+    """Track whose centre followed `points` (one per step), 20x20 box."""
+    t = Track(1, (0, 0, 20, 20), conf, 10, deque(), deque([True] * 10, maxlen=10), 0.0,
+              centers=deque(maxlen=40))
+    for i, (x, y) in enumerate(points):
+        t.centers.append((i, x, y))
+        t.bbox = (x - 10, y - 10, x + 10, y + 10)
+    return t
+
+
+def test_fall_kinematics_accepts_gravity_fall():
+    # x drifts at constant speed, y accelerates: ballistic fall from rest.
+    pts = [(300 + 2 * i, 50 + 3 * i * i) for i in range(6)]
+    k, v = fall_kinematics(path_track(pts), SHAPE, Settings())
+    assert k == pytest.approx(1.0) and v > 0.5
+    assert score(path_track(pts), SHAPE, Settings()) >= 0.70
+
+
+@pytest.mark.parametrize("name,pts", [
+    ("tree sway", [(300 + 20 * (-1) ** i, 100 + 2 * i) for i in range(8)]),
+    ("bird sideways", [(100 + 25 * i, 150 + 3 * (i % 2)) for i in range(8)]),
+    ("bird climbing", [(300 + 5 * i, 300 - 20 * i) for i in range(8)]),
+    ("bird pulls out of dive", [(300 + 3 * i * i, 100 + 20 * i) for i in range(6)]),
+    ("too short", [(300, 50), (300, 80), (300, 120)]),
+    ("static rock", [(300, 200)] * 8),
+])
+def test_fall_kinematics_rejects_non_fall(name, pts):
+    assert score(path_track(pts), SHAPE, Settings()) < 0.40, name
+
+
+def test_tracker_follows_fast_fall_without_iou_overlap():
+    tr = IoUTracker(Settings())
+    ys = [20, 50, 95, 155, 230]  # moves more than its own 30 px size per step
+    for y in ys:
+        tr.update([Detection((100, y, 130, y + 30), 0.8)])
+    assert len(tr.tracks) == 1 and len(tr.tracks[0].centers) == len(ys)
+
+
+def test_debounce_follows_track_across_regions_and_alerts_once():
+    am = AlertManager(Settings(), clock=FakeClock())
+    t = path_track([(0, 0)])
+    out = [am.update("HIGH", 0.8, r, t) for r in ("r0c1", "r1c1", "r2c1")]
+    assert out[-1]["type"] == "ALERT"  # 3 HIGHs of one rock, three different cells
+    assert all(am.update("HIGH", 0.8, "r2c2", t) is None for _ in range(6))  # same rock: no repeat
+
+
+def test_global_motion_is_not_forwarded():
+    from rockfall.pipeline import Pipeline
+    p = Pipeline(Settings(detector_mode="motion", veto_model=""), None)
+    dark = np.full((200, 300, 3), 60, np.uint8)
+    p.process_frame(dark)
+    st = p.process_frame(dark + 100)  # whole frame brightens: exposure jump
+    assert st["frame_forwarded"] is False and st["tracks"] == []
+
+
+def test_email_refuses_credentials_without_tls(monkeypatch):
+    import smtplib
+    from rockfall.alerts import Notifier
+
+    class FakeSMTP:
+        def __init__(self, *a, **k): self.logged_in = False
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def ehlo(self): pass
+        def has_extn(self, name): return False
+        def login(self, *a): raise AssertionError("login without TLS")
+        def send_message(self, m): raise AssertionError("sent")
+
+    monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
+    n = Notifier.__new__(Notifier)
+    n.cfg = Settings(smtp_host="mail", alert_to="a@b", smtp_user="u", smtp_pass="p")
+    with pytest.raises(RuntimeError, match="STARTTLS"):
+        n._email({"message": "m", "risk": 0.9, "region": "r0c0", "ts": 0})

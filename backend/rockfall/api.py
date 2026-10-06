@@ -12,7 +12,8 @@ from .pipeline import Pipeline
 
 MUTABLE = {"tau", "theta", "sigma", "min_area", "yolo_conf", "yolo_iou", "history_n", "w1", "w2",
            "w3", "w4", "theta_mod", "theta_high", "debounce_k", "cooldown_s", "frame_skip",
-           "danger_band", "iou_match", "max_age", "site_location"}
+           "danger_band", "iou_match", "max_age", "site_location", "global_motion_max",
+           "match_gate", "fall_min_points", "fall_min_drop", "fall_speed_ref", "veto_conf"}
 
 
 def create_app(pipeline: Pipeline, cfg: Settings | None = None) -> FastAPI:

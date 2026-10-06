@@ -47,7 +47,9 @@ class AlertManager:
         self._last_alert: dict = {}
         self._suppress_noted: set = set()
 
-    def update(self, level: str, risk: float, region: str | None) -> dict | None:
+    def update(self, level: str, risk: float, region: str | None, track=None) -> dict | None:
+        """Debounce follows the track when one is given (a falling rock crosses grid cells);
+        cooldown stays per region. A track alerts at most once."""
         now = self.clock()
         event = None
         if level != self.level:
@@ -55,15 +57,20 @@ class AlertManager:
                      "region": region, "message": f"Level {self.level} -> {level}"}
             self.level = level
         if level == HIGH and region is not None:
-            if region != self._streak_region:
-                self._streak_region = region
+            key = ("track", track.id) if track is not None else ("region", region)
+            if key != self._streak_region:
+                self._streak_region = key
                 self._streak = 0
             self._streak += 1
-            if self._streak >= self.cfg.debounce_k:
+            if track is not None and getattr(track, "alerted", False):
+                pass  # this rock already raised an alert
+            elif self._streak >= self.cfg.debounce_k:
                 self._streak = 0
                 last = self._last_alert.get(region)
                 if last is None or now - last >= self.cfg.cooldown_s:
                     self._last_alert[region] = now
+                    if track is not None:
+                        track.alerted = True
                     self._suppress_noted.discard(region)
                     event = {"ts": now, "type": "ALERT", "level": level, "risk": round(risk, 3),
                              "region": region,
@@ -128,10 +135,12 @@ class Notifier:
         msg["Subject"], msg["From"], msg["To"] = subject, c.smtp_user or "rockfall@localhost", c.alert_to
         msg.set_content(body)
         with smtplib.SMTP(c.smtp_host, c.smtp_port, timeout=15) as s:
-            try:
+            s.ehlo()
+            if s.has_extn("starttls"):
                 s.starttls()
-            except smtplib.SMTPException:
-                pass
+                s.ehlo()
+            elif c.smtp_user:
+                raise RuntimeError("SMTP server has no STARTTLS; refusing to send credentials in clear text")
             if c.smtp_user:
                 s.login(c.smtp_user, c.smtp_pass)
             s.send_message(msg)

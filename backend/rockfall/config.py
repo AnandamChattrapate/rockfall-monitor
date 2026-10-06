@@ -15,11 +15,16 @@ class Settings:
     theta: float = 0.015          # motion activity threshold
     sigma: float = 1.5            # Gaussian sigma
     min_area: int = 400           # min contour area (px)
+    global_motion_max: float = 0.30  # ratio above this = lighting change / camera shake; skip frame
     # Detector
     yolo_conf: float = 0.45
     yolo_iou: float = 0.50
     detector_mode: str = "auto"   # auto | yolo | motion
     rock_weights: str = str(BACKEND_DIR / "models" / "rock.pt")
+    rock_classes: str = "rock,rocks,boulder,stone"  # YOLO class names kept in yolo mode
+    # COCO model that removes birds, people, vehicles and animals; "" disables it
+    veto_model: str = str(BACKEND_DIR / "models" / "yolov8n.pt")
+    veto_conf: float = 0.30
     # Tracker / risk
     history_n: int = 10
     w1: float = 0.35              # confidence C
@@ -29,6 +34,11 @@ class Settings:
     theta_mod: float = 0.40
     theta_high: float = 0.70
     iou_match: float = 0.3
+    match_gate: float = 3.0       # centroid match gate, in multiples of the track's bbox diagonal
+    fall_min_points: int = 4      # matched updates needed before a track can score
+    fall_window: int = 40         # matched updates kept per track; the whole lifetime must look like a fall
+    fall_min_drop: float = 0.05   # net downward drop (fraction of frame height) for full score
+    fall_speed_ref: float = 0.03  # downward speed (frame heights per step) that scores 1
     max_age: int = 5              # frames a track survives without a match
     danger_band: float = 0.25     # bottom fraction of frame that is the danger zone
     grid: int = 3                 # regions = grid x grid cells
