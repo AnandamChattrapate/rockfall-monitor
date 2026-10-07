@@ -24,6 +24,8 @@ PLAN.md     Implementation plan
 
 ## Run locally
 
+**New to the project?** Follow [SETUP.md](SETUP.md). It has step-by-step setup for macOS and Windows and a one-command setup script for each (`scripts/setup.sh`, `scripts/setup.ps1`). The steps below are the manual version.
+
 ### 1. Prerequisites
 
 - Python 3.10 or later (tested on 3.14)
