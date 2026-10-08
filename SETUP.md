@@ -205,4 +205,5 @@ Do not commit `.env`. It is in `.gitignore`.
 | `pip install` fails on `torch` | Python version too new for your platform's PyTorch build | Install Python 3.12, delete `backend/.venv`, and run setup again. |
 | `npm install` permission error on `~/.npm` (macOS) | Root-owned npm cache | `sudo chown -R $(id -u):$(id -g) ~/.npm` |
 | Everything moving is flagged | You are on old code | Run `git pull`. The fix is in commit `ae9e886`. |
+| No alarm sound | The siren plays only on an ALERT (a High risk that holds for 3 checks on a falling object). Normal movement does not trigger it. In the dashboard, the alarm is muted until you click **Enable alarm sound**. | Click **Enable alarm sound**, then **Test alert**. You should hear the dashboard alarm, and on macOS the backend siren too. |
 | First run pauses for a few seconds | It is downloading the bird and person filter model `yolov8n.pt` (about 6 MB) | Wait once. It is cached in `backend/models/`. |

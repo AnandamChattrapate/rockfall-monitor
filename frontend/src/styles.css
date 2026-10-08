@@ -33,3 +33,8 @@ th{color:var(--muted);font-weight:400;font-size:12px}
 .settings{display:grid;gap:8px}
 .settings label{display:flex;justify-content:space-between;align-items:center;gap:8px;color:var(--muted)}
 .settings input{width:110px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:3px;padding:4px 6px;font:inherit}
+.alarm{margin-left:auto;display:flex;gap:8px;align-items:center}
+.alarm button{padding:4px 10px}
+.btn-warn{background:var(--high);color:#fff;border-color:var(--high)}
+.armed{color:var(--low)}
+.ev-TEST{border-left-color:var(--mod)}

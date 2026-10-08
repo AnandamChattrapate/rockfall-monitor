@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
+from .alerts import test_event
 from .config import Settings
 from .pipeline import Pipeline
 
@@ -18,6 +19,7 @@ MUTABLE = {"tau", "theta", "sigma", "min_area", "yolo_conf", "yolo_iou", "histor
 
 def create_app(pipeline: Pipeline, cfg: Settings | None = None) -> FastAPI:
     cfg = cfg or pipeline.cfg
+    notifier = getattr(pipeline.alerts, "notifier", None)
     app = FastAPI(title="Rockfall Monitor")
     app.add_middleware(CORSMiddleware, allow_origins=[cfg.cors_origin], allow_methods=["*"],
                        allow_headers=["*"])
@@ -49,6 +51,16 @@ def create_app(pipeline: Pipeline, cfg: Settings | None = None) -> FastAPI:
                 raise HTTPException(400, f"bad value for {k}")
         return cfg.as_dict()
 
+    @app.post("/api/test-alert")
+    def test_alert():
+        """Fire the email + siren path and show a TEST event, to check alert delivery."""
+        ev = test_event(cfg)
+        if notifier is not None:
+            notifier.notify(ev)
+        ev["id"] = pipeline.store.add(ev) if pipeline.store else -1
+        pipeline.push_event(ev)
+        return {"sent": notifier is not None, "event": ev}
+
     @app.get("/video")
     async def video():
         async def gen():
@@ -66,16 +78,16 @@ def create_app(pipeline: Pipeline, cfg: Settings | None = None) -> FastAPI:
     @app.websocket("/ws")
     async def ws(sock: WebSocket):
         await sock.accept()
-        last_id = pipeline.recent_events[-1]["id"] if pipeline.recent_events else 0
+        last_seq = pipeline.recent_events[-1]["seq"] if pipeline.recent_events else 0
         try:
             while True:
                 state = dict(pipeline.state)
-                state["event"] = None
-                for ev in list(pipeline.recent_events):
-                    if ev["id"] > last_id:
-                        state["event"] = ev
-                        last_id = ev["id"]
-                        break
+                # Send every event since the last tick, so an ALERT never queues behind others.
+                new = [ev for ev in list(pipeline.recent_events) if ev["seq"] > last_seq]
+                if new:
+                    last_seq = new[-1]["seq"]
+                state["events"] = new
+                state["event"] = new[-1] if new else None
                 await sock.send_json(state)
                 await asyncio.sleep(0.2)
         except (WebSocketDisconnect, RuntimeError):

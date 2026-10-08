@@ -46,6 +46,9 @@ class Pipeline:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self.last_error: str | None = None
+        self._live_id = 0
+        self._event_seq = 0
+        self._prev_level = LOW
 
     # ---- core step -------------------------------------------------
     def _make_state(self, ratio, forwarded, tracks, event) -> dict:
@@ -56,12 +59,16 @@ class Pipeline:
     def process_frame(self, frame: np.ndarray) -> dict:
         m = self.motion.process(frame)
         # Very high ratio = exposure change, cloud shadow or camera shake, not a rock.
-        forwarded = self.cfg.theta <= m.ratio <= self.cfg.global_motion_max
+        forwarded = bool(m.boxes) and self.cfg.theta <= m.ratio <= self.cfg.global_motion_max
         dets = self.veto.filter(frame, self.detector.detect(frame, m)) if forwarded else []
-        active = self.tracker.update(dets)
+        self.tracker.update(dets)
+        # A track missed for one frame keeps its last risk: one detector blink must not
+        # reset the k-consecutive debounce of a rock that is still falling.
+        active = [t for t in self.tracker.tracks if t.matched or t.misses <= self.cfg.hold_misses]
         tracks, best, best_track = [], 0.0, None
         for t in active:
-            r = score(t, frame.shape, self.cfg)
+            r = score(t, frame.shape, self.cfg) if t.matched else t.last_risk
+            t.last_risk = r
             tracks.append({"id": t.id, "bbox": [int(v) for v in t.bbox], "conf": round(t.conf, 3),
                            "persistence": round(t.persistence, 3), "growth": round(t.growth, 3),
                            "risk": round(r, 3)})
@@ -72,11 +79,26 @@ class Pipeline:
         region = region_of(best_track.bbox, frame.shape, self.cfg.grid) if best_track else None
         event = self.alerts.update(self.level, best, region, best_track)
         if event is not None:
-            event["id"] = self.store.add(event) if self.store else len(self.recent_events) + 1
-            self.recent_events.append(event)
+            if self.store and self._should_store(event):
+                event["id"] = self.store.add(event)
+            else:
+                self._live_id -= 1  # negative ids: live-only events, never collide with stored ones
+                event["id"] = self._live_id
+            self.push_event(event)
         self.state = self._make_state(m.ratio, forwarded, tracks, event)
         self.last_motion = m
         return self.state
+
+    def push_event(self, event: dict) -> None:
+        """Queue an event for /ws clients; seq orders delivery (ids can be negative)."""
+        self._event_seq += 1
+        event["seq"] = self._event_seq
+        self.recent_events.append(event)
+
+    def _should_store(self, event: dict) -> bool:
+        """Persist alerts and HIGH transitions; LOW<->MODERATE flicker is live-only."""
+        prev, self._prev_level = self._prev_level, event["level"]
+        return event["type"] != "LEVEL_CHANGE" or HIGH in (event["level"], prev)
 
     def feed(self, frame: np.ndarray) -> dict | None:
         """Apply frame skipping (2 normally, 1 at MODERATE+). Returns state if processed."""

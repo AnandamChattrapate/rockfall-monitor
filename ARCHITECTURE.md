@@ -63,9 +63,11 @@ OpenCV reads a frame from the camera. At Low risk, only every 2nd frame is proce
 3. Compute the **motion ratio** m, the fraction of pixels that moved.
 4. Group the moving pixels into blobs (contours). Drop blobs under 400 px.
 
-The frame goes to the next stage only if 0.015 ≤ m ≤ 0.30:
-- below 1.5%, nothing is happening;
-- above 30%, the whole image changed. That is a lighting jump, a cloud shadow or camera shake, not a rock.
+The frame goes to the next stage only if both hold:
+- at least one blob is 400 px or larger;
+- 0.001 ≤ m ≤ 0.30. Above 30%, the whole image changed: a lighting jump, a cloud shadow or camera shake, not a rock.
+
+The paper's θ = 0.015 is lowered to 0.001. At 0.015, a rock had to cover 1.5% of the whole frame (about 68×68 px at 640×480), so small or distant rocks were never analysed.
 
 This stage is cheap, so the expensive stages run only when something moves.
 
@@ -94,7 +96,7 @@ The tracker also computes two values per track:
 - **Persistence P:** the fraction of the last 10 frames in which the track was seen.
 - **Growth ΔA:** how fast the box area grows, for example as a rock comes toward the camera.
 
-A track is deleted after it goes unseen for 5 processed frames.
+A track is deleted after it goes unseen for 5 processed frames. If a track is missed for 1 frame, it keeps its last risk (`RF_HOLD_MISSES=1`). One detector blink then does not reset the debounce of a rock that is still falling.
 
 ### Step 4: Risk score (`risk.py`)
 
@@ -140,7 +142,9 @@ When an alert fires, the **Notifier** sends the email and sounds the siren on a 
 |---|---|---|
 | Email | Written to the log only | Set `RF_SMTP_HOST`, `RF_SMTP_PORT`, `RF_SMTP_USER`, `RF_SMTP_PASS`, `RF_ALERT_TO` (comma-separated list). TLS is required. |
 | Siren | macOS: a 2 s tone on the backend computer's speakers. Windows: written to the log only. | Set `RF_SIREN_WEBHOOK`. It receives an HTTP POST, for example to a siren relay controller. |
-| Dashboard | Red ALERT row in the event log | Someone must watch the page |
+| Dashboard | Red ALERT row, a 3 s alarm sound and a browser notification | Click **Enable alarm sound** once per page load. Browsers block sound until you click the page. Allow notifications when the browser asks. |
+
+**Test the alert path:** click **Test alert** in the dashboard, or run `curl -X POST http://127.0.0.1:8000/api/test-alert`. This runs the real email and siren path with a `TEST` event. The email subject is `[Rockfall TEST]`.
 
 ### Step 6: Publish
 
@@ -156,11 +160,17 @@ The thread draws the overlay on the frame: boxes, track ids, the risk badge, the
 |---|---|---|
 | `id` | INTEGER, auto | Event number |
 | `ts` | REAL | Unix time in seconds |
-| `type` | TEXT | `LEVEL_CHANGE`, `ALERT` or `SUPPRESSED` (an alert that cooldown blocked) |
+| `type` | TEXT | `LEVEL_CHANGE`, `ALERT`, `SUPPRESSED` (an alert that cooldown blocked) or `TEST` |
 | `level` | TEXT | `LOW`, `MODERATE` or `HIGH` |
 | `risk` | REAL | Risk score R at that moment |
 | `region` | TEXT | Grid cell, such as `r1c1` (row 1, column 1) |
 | `message` | TEXT | Readable text |
+
+**What IS stored:**
+- every `ALERT`, `SUPPRESSED` and `TEST` event;
+- level changes into or out of HIGH.
+
+Low↔Moderate changes go to the dashboard live but are not stored. They used to fill the table with thousands of rows.
 
 **What is NOT stored:**
 - video or images;
@@ -173,7 +183,7 @@ The thread draws the overlay on the frame: boxes, track ids, the risk badge, the
 - SQL: `sqlite3 backend/data/events.db "select * from events order by id desc limit 20;"`.
 
 **Known limits:**
-- **The log grows without limit.** Every Low↔Moderate change adds a row, and there is no cleanup.
+- **There is no cleanup or retention period.** The log is now much smaller, but it still grows forever.
 - **It is local to one machine.** Each site has its own file, and there is no central database.
 
 ## 5. API (`api.py`)
@@ -181,7 +191,8 @@ The thread draws the overlay on the frame: boxes, track ids, the risk badge, the
 | Endpoint | Type | Used by | Returns |
 |---|---|---|---|
 | `GET /video` | MJPEG stream (`multipart/x-mixed-replace`) | Dashboard `<img>` | Annotated live frames |
-| `WS /ws` | WebSocket, about 5 messages per second | Dashboard | `{ts, fps, motion_ratio, frame_forwarded, risk, level, detector_mode, tracks[], event}` |
+| `WS /ws` | WebSocket, about 5 messages per second | Dashboard | `{ts, fps, motion_ratio, frame_forwarded, risk, level, detector_mode, tracks[], events[], event}`. `events` holds every event since the last message, in order. `event` is the last one, kept for compatibility. |
+| `POST /api/test-alert` | JSON | "Test alert" button | Fires the email and siren with a `TEST` event |
 | `GET /api/events` | JSON | Dashboard on load | Last N events from SQLite |
 | `GET /api/config` | JSON | Settings panel | Current settings. The SMTP password is masked. |
 | `PUT /api/config` | JSON | Settings panel | Changes only allow-listed tunables, live, with no restart. Changes are not saved to disk. |
@@ -242,4 +253,4 @@ Every setting in `config.py` can be overridden by an environment variable named 
 3. **The danger zone is fixed** to the bottom 25% of the frame. Each camera needs it set for its own view.
 4. **The camera must be fixed.** A moving or panning camera breaks frame differencing.
 5. **Tested on synthetic video only.** Validate on real site footage with `scripts/evaluate.py`.
-6. **No SMS or mobile push, and no alert sound in the dashboard.** The event log grows without limit.
+6. **No SMS or mobile push.** The dashboard alarm works only while the page is open and the sound is enabled.

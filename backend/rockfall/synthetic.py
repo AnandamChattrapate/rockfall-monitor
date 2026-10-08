@@ -16,7 +16,8 @@ def _background(w: int, h: int, rng) -> np.ndarray:
 
 
 def make_synthetic(path: str, frames: int = 150, w: int = 640, h: int = 360,
-                   fps: int = 20, seed: int = 0, fall_start: int = 40, rocks: int = 3) -> dict:
+                   fps: int = 20, seed: int = 0, fall_start: int = 40, rocks: int = 3,
+                   radius: float = 14.0, max_radius: float = 34.0) -> dict:
     """Write an mp4. Returns metadata (fps, onset_s, impact_s)."""
     rng = np.random.default_rng(seed)
     bg = _background(w, h, rng)
@@ -26,7 +27,7 @@ def make_synthetic(path: str, frames: int = 150, w: int = 640, h: int = 360,
     specs = []
     for i in range(rocks):
         specs.append(dict(x=w * (0.3 + 0.2 * i) + rng.uniform(-20, 20), y=h * 0.12,
-                          r=14.0, vy=0.0, vx=rng.uniform(-1.0, 1.0), t0=fall_start + 6 * i))
+                          r=radius, vy=0.0, vx=rng.uniform(-1.0, 1.0), t0=fall_start + 6 * i))
     impact = None
     for f in range(frames):
         img = bg.copy()
@@ -37,7 +38,7 @@ def make_synthetic(path: str, frames: int = 150, w: int = 640, h: int = 360,
                 s["vy"] += 0.9
                 s["y"] += s["vy"]
                 s["x"] += s["vx"]
-                s["r"] = min(34.0, s["r"] * 1.05)
+                s["r"] = min(max_radius, s["r"] * 1.05)
                 pos = (s["x"], s["y"], s["r"])
             x, y, r = pos
             if y - r > h:

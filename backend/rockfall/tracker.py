@@ -37,6 +37,7 @@ class Track:
     matched: bool = True
     centers: deque = field(default_factory=deque)   # (step, cx, cy), up to cfg.fall_window
     alerted: bool = False
+    last_risk: float = 0.0
 
     @property
     def persistence(self) -> float:

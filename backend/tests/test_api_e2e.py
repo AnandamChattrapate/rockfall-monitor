@@ -53,3 +53,41 @@ def test_distractors_never_reach_high(tmp_path, seed):
     make_distractors(p, seed=seed)
     events = run_offline(p, Settings(detector_mode="motion", veto_model=""))
     assert not any(e["level"] == "HIGH" for e in events), events
+
+
+def test_small_rock_alerts(tmp_path):
+    """A rock ~16 px wide in a 640x360 frame moves far fewer than 1.5% of pixels."""
+    p = str(tmp_path / "small.mp4")
+    make_synthetic(p, rocks=1, radius=8.0, max_radius=8.0)
+    events = run_offline(p, Settings(detector_mode="motion", veto_model=""))
+    assert any(e["type"] == "ALERT" for e in events), events
+
+
+def test_ws_delivers_every_event_in_order(tmp_path):
+    cfg = Settings(db_path=str(tmp_path / "e.db"), detector_mode="motion")
+    pipe = Pipeline(cfg, 0, store=EventStore(cfg.db_path))
+    c = TestClient(create_app(pipe))
+    with c.websocket_connect("/ws") as ws:
+        ws.receive_json()
+        for i in range(4):  # burst faster than the 5 Hz tick
+            pipe.push_event({"id": -i - 1, "ts": i, "type": "LEVEL_CHANGE", "level": "LOW",
+                             "risk": 0, "region": None, "message": str(i)})
+        got = []
+        while len(got) < 4:
+            got += ws.receive_json()["events"]
+    assert [e["message"] for e in got] == ["0", "1", "2", "3"]
+
+
+def test_test_alert_endpoint(tmp_path):
+    got = []
+
+    class N:
+        def notify(self, e):
+            got.append(e)
+
+    from rockfall.alerts import AlertManager
+    cfg = Settings(db_path=str(tmp_path / "e.db"), detector_mode="motion")
+    pipe = Pipeline(cfg, 0, store=EventStore(cfg.db_path), alerts=AlertManager(cfg, notifier=N()))
+    r = TestClient(create_app(pipe)).post("/api/test-alert").json()
+    assert r["sent"] is True and got[0]["type"] == "TEST"
+    assert pipe.store.list(1)[0]["type"] == "TEST"

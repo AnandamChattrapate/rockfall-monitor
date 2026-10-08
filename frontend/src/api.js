@@ -12,6 +12,11 @@ export async function getConfig() {
   if (!r.ok) throw new Error('config ' + r.status)
   return r.json()
 }
+export async function testAlert() {
+  const r = await fetch(API_URL + '/api/test-alert', { method: 'POST' })
+  if (!r.ok) throw new Error('test alert failed (' + r.status + ')')
+  return r.json()
+}
 export async function putConfig(cfg) {
   const r = await fetch(API_URL + '/api/config', {
     method: 'PUT',

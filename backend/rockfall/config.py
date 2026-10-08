@@ -12,7 +12,7 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 class Settings:
     # Motion filter
     tau: int = 25                 # motion pixel threshold
-    theta: float = 0.015          # motion activity threshold
+    theta: float = 0.001          # motion noise floor (paper: 0.015; that drops rocks under ~8% of frame width)
     sigma: float = 1.5            # Gaussian sigma
     min_area: int = 400           # min contour area (px)
     global_motion_max: float = 0.30  # ratio above this = lighting change / camera shake; skip frame
@@ -40,6 +40,7 @@ class Settings:
     fall_min_drop: float = 0.05   # net downward drop (fraction of frame height) for full score
     fall_speed_ref: float = 0.03  # downward speed (frame heights per step) that scores 1
     max_age: int = 5              # frames a track survives without a match
+    hold_misses: int = 1          # missed frames a track keeps its last risk for
     danger_band: float = 0.25     # bottom fraction of frame that is the danger zone
     grid: int = 3                 # regions = grid x grid cells
     # Alerts

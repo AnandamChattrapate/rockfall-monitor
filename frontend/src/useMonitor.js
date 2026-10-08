@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { WS_URL, getEvents } from './api.js'
+import { notify, playAlarm } from './alarm.js'
 
 const WINDOW_S = 600
 const MAX_EVENTS = 200
@@ -41,7 +42,12 @@ export function useMonitor() {
           while (i < next.length && next[i].ts < cut) i++
           return i ? next.slice(i) : next
         })
-        if (d.event) setEvents((cur) => merge(cur, [d.event]))
+        const fresh = d.events || (d.event ? [d.event] : [])
+        if (fresh.length) {
+          setEvents((cur) => merge(cur, fresh))
+          const alarm = fresh.find((e) => e.type === 'ALERT' || e.type === 'TEST')
+          if (alarm) { playAlarm(); notify(alarm) }
+        }
       }
       ws.onclose = () => {
         if (closed) return

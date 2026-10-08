@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { VIDEO_URL, getConfig, putConfig } from '../api.js'
+import { VIDEO_URL, getConfig, putConfig, testAlert } from '../api.js'
+import { armSound, soundArmed } from '../alarm.js'
 
 export const THETA_MOD = 0.4
 export const THETA_HIGH = 0.7
@@ -126,7 +127,33 @@ export function Telemetry({ tick, status }) {
       <span>Motion <b>{tick ? (tick.motion_ratio * 100).toFixed(1) + '%' : '--'}</b></span>
       <span>Detector <b>{tick ? tick.detector_mode : '--'}</b></span>
       <span className={'conn conn-' + status}><i />{status}</span>
+      <AlarmControls />
     </header>
+  )
+}
+
+function AlarmControls() {
+  const [armed, setArmed] = useState(soundArmed())
+  const [msg, setMsg] = useState('')
+  const enable = () => { armSound(); setTimeout(() => setArmed(soundArmed()), 100) }
+  const test = async () => {
+    enable()
+    setMsg('sending…')
+    try {
+      const r = await testAlert()
+      setMsg(r.sent ? 'test sent (siren + email)' : 'test shown (no notifier)')
+    } catch (e) {
+      setMsg(e.message)
+    }
+  }
+  return (
+    <span className="alarm">
+      {armed
+        ? <b className="armed">🔔 Sound on</b>
+        : <button className="btn-warn" onClick={enable}>🔇 Enable alarm sound</button>}
+      <button onClick={test}>Test alert</button>
+      {msg && <small className="muted">{msg}</small>}
+    </span>
   )
 }
 

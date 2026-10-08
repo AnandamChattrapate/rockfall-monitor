@@ -229,3 +229,29 @@ def test_email_refuses_credentials_without_tls(monkeypatch):
     n.cfg = Settings(smtp_host="mail", alert_to="a@b", smtp_user="u", smtp_pass="p")
     with pytest.raises(RuntimeError, match="STARTTLS"):
         n._email({"message": "m", "risk": 0.9, "region": "r0c0", "ts": 0})
+
+
+def test_one_missed_frame_keeps_debounce(monkeypatch):
+    """HIGH, HIGH, (detector blink), HIGH must still alert."""
+    from rockfall import pipeline as pl
+    cfg = Settings(detector_mode="motion", veto_model="")
+    p = pl.Pipeline(cfg, None, clock=FakeClock())
+    frames = iter([[Detection((100, 100, 130, 130), 0.9)], [Detection((100, 140, 130, 170), 0.9)],
+                   [], [Detection((100, 220, 130, 250), 0.9)]])
+    monkeypatch.setattr(p.detector, "detect", lambda f, m: next(frames))
+    monkeypatch.setattr(pl, "score", lambda t, shape, c: 0.9)
+    p.motion.process = lambda f: type("M", (), {"ratio": 0.01, "boxes": [(0, 0, 1, 1)]})()
+    img = np.zeros((400, 600, 3), np.uint8)
+    types = [(p.process_frame(img)["event"] or {}).get("type") for _ in range(4)]
+    assert "ALERT" in types, types
+
+
+def test_flicker_not_stored(tmp_path):
+    from rockfall.pipeline import Pipeline
+    from rockfall.store import EventStore
+    p = Pipeline(Settings(veto_model=""), None, store=EventStore(str(tmp_path / "e.db")))
+    for lvl, prev in (("MODERATE", "LOW"), ("LOW", "MODERATE"), ("HIGH", "LOW"), ("LOW", "HIGH")):
+        p._prev_level = prev
+        stored = p._should_store({"type": "LEVEL_CHANGE", "level": lvl})
+        assert stored == (lvl == "HIGH" or prev == "HIGH")
+    assert p._should_store({"type": "ALERT", "level": "HIGH"})

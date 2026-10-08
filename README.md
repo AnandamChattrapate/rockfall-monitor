@@ -152,7 +152,7 @@ Email alerts are logged, not sent, until `RF_SMTP_HOST` and `RF_ALERT_TO` are se
 | Env Var | Default | Description |
 |---------|---------|-------------|
 | `RF_TAU` | `25` | Motion pixel threshold (0–255) |
-| `RF_THETA` | `0.015` | Motion activity ratio threshold |
+| `RF_THETA` | `0.001` | Motion noise floor. The paper uses 0.015, which misses small rocks. |
 | `RF_SIGMA` | `1.5` | Gaussian blur sigma |
 | `RF_MIN_AREA` | `400` | Minimum contour area (px²) |
 

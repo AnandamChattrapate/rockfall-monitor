@@ -125,7 +125,8 @@ class Notifier:
 
     def _email(self, ev: dict) -> None:
         c = self.cfg
-        subject = f"[Rockfall ALERT] {c.site_location}"
+        kind = "TEST" if ev.get("type") == "TEST" else "ALERT"
+        subject = f"[Rockfall {kind}] {c.site_location}"
         body = (f"{ev['message']}\nSite: {c.site_location}\nRisk: {ev['risk']}\n"
                 f"Region: {ev['region']}\nTime: {time.ctime(ev['ts'])}\n")
         if not (c.smtp_host and c.alert_to):
@@ -155,5 +156,15 @@ class Notifier:
             path = os.path.join(tempfile.gettempdir(), "rockfall_siren.wav")
             make_siren_wav(path)
             subprocess.run(["afplay", path], check=False, timeout=30)
+        elif sys.platform == "win32":
+            import winsound
+            for _ in range(4):
+                winsound.Beep(1200, 250)
+                winsound.Beep(700, 250)
         else:
             log.warning("SIREN (no audio backend): %s", ev["message"])
+
+
+def test_event(cfg: Settings) -> dict:
+    return {"ts": time.time(), "type": "TEST", "level": "HIGH", "risk": 1.0, "region": None,
+            "message": f"Test alert from {cfg.site_location}"}
