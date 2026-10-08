@@ -91,3 +91,13 @@ def test_test_alert_endpoint(tmp_path):
     r = TestClient(create_app(pipe)).post("/api/test-alert").json()
     assert r["sent"] is True and got[0]["type"] == "TEST"
     assert pipe.store.list(1)[0]["type"] == "TEST"
+
+
+@pytest.mark.parametrize("origin,ok", [("http://localhost:5173", True), ("http://127.0.0.1:5173", True),
+                                       ("http://localhost:5180", True), ("http://evil.example", False)])
+def test_cors_allows_local_dashboards_only(tmp_path, origin, ok):
+    cfg = Settings(db_path=str(tmp_path / "e.db"), detector_mode="motion")
+    c = TestClient(create_app(Pipeline(cfg, 0, store=EventStore(cfg.db_path))))
+    r = c.options("/api/config", headers={"Origin": origin, "Access-Control-Request-Method": "PUT",
+                                          "Access-Control-Request-Headers": "content-type"})
+    assert (r.status_code == 200 and r.headers.get("access-control-allow-origin") == origin) == ok

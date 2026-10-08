@@ -21,8 +21,11 @@ def create_app(pipeline: Pipeline, cfg: Settings | None = None) -> FastAPI:
     cfg = cfg or pipeline.cfg
     notifier = getattr(pipeline.alerts, "notifier", None)
     app = FastAPI(title="Rockfall Monitor")
-    app.add_middleware(CORSMiddleware, allow_origins=[cfg.cors_origin], allow_methods=["*"],
-                       allow_headers=["*"])
+    # Any local dashboard origin (localhost / 127.0.0.1 / [::1], any port) plus cfg.cors_origin.
+    # The browser treats localhost:5173 and 127.0.0.1:5173 as different origins.
+    app.add_middleware(CORSMiddleware, allow_origins=[cfg.cors_origin],
+                       allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?",
+                       allow_methods=["*"], allow_headers=["*"])
 
     @app.get("/health")
     def health():
